@@ -1,0 +1,48 @@
+<UserControl x:Class="BinanceBot.Views.StrategyView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:converters="clr-namespace:BinanceBot.Views.Converters"
+             mc:Ignorable="d"
+             xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF"
+             d:DesignHeight="300" d:DesignWidth="300">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <converters:TextToDecimalConverter x:Key="TextToDecimal" />
+            <converters:TextToIntConverter x:Key="TextToInt" />
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="4*"/>
+            <RowDefinition Height="1*"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="10*"/>
+            <ColumnDefinition Width="1*"/>
+        </Grid.ColumnDefinitions>
+        <lvc:CartesianChart Grid.Column="0" Grid.Row="0"
+            Series="{Binding Series}" XAxes="{Binding XAxes}" LegendPosition="Hidden" ZoomMode="X">
+        </lvc:CartesianChart>
+        <lvc:CartesianChart Grid.Column="0" Grid.Row="1"
+                            Series="{Binding Volumes}" XAxes="{Binding XAxes}" LegendPosition="Hidden" ZoomMode="X">
+        </lvc:CartesianChart>
+        <StackPanel Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" Orientation="Vertical">
+            <TextBlock Text="delta step:" Margin="10, 10, 10, 0"/>
+            <TextBox Text="{Binding Path=Strategy.DeltaSteps, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged,Converter={StaticResource TextToInt}}" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="volume:" Margin="10, 10, 10, 0"/>
+            <TextBox Text="{Binding Path=Strategy.Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged,Converter={StaticResource TextToDecimal}}" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="make deals:" Margin="10, 10, 10, 0"/>
+            <CheckBox IsChecked="{Binding Path=Strategy.MakeDeals, Mode=TwoWay}" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="current direction:" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="{Binding Path=Strategy.Direction}" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="price tick:" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="{Binding Path=Strategy.PriceTick}" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="volume tick:" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="{Binding Path=Strategy.VolumeTick}" Margin="10, 10, 10, 0"/>
+            <TextBlock Text="direction changed:" Margin="10, 10, 10, 0"/>
+            <CheckBox IsChecked="{Binding Path=Strategy.DirectionChanged, Mode=TwoWay}" Margin="10, 10, 10, 0"/>
+        </StackPanel>
+    </Grid>
+</UserControl>
