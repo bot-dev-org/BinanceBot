@@ -60,12 +60,14 @@ public class BinanceManager
 
         _wsClient = new BinanceSocketClient(new BinanceSocketClientOptions
         {
-            AutoReconnect = true,
-            ReconnectInterval = TimeSpan.FromSeconds(5),
-            SocketNoDataTimeout = TimeSpan.FromSeconds(90),
-            ApiCredentials = creds,
-            LogLevel = LogLevel.Debug,
-            LogWriters = new List<ILogger> {binanceLogger}
+            UsdFuturesStreamsOptions = new SocketApiClientOptions()
+            {
+                AutoReconnect = true,
+                ReconnectInterval = TimeSpan.FromSeconds(5),
+                SocketNoDataTimeout = TimeSpan.FromSeconds(90),
+                ApiCredentials = creds,
+            },
+            LogLevel = LogLevel.Debug
         });
     }
 
