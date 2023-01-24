@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO.Pipes;
+using System.Net;
 using System.Text;
 using System.Threading;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -21,20 +23,41 @@ namespace BinanceBot.Services
         private readonly byte[] _getLastValueCommand = BitConverter.GetBytes(7);
         private readonly NamedPipeClientStream _clientStream;
         private readonly object _syncObj = new ();
-        private const string PIPE_NAME = "BinanceBot";
+        private string pipeName;
         private ILogger<PythonClient> _logger;
         private readonly Timer timer;
+        private string critAPIKey;
+        private string chatID;
 
         public int LastValue { get; private set; }
 
-        public PythonClient(ILogger<PythonClient> logger)
+        public PythonClient(ILogger<PythonClient> logger, IConfiguration config)
         {
+            critAPIKey = config["TelegramCritAPIKey"];
+            chatID = config["TelegramChatId"];
+            pipeName = config["PipeName"];
             _logger = logger;
             _logger.LogInformation("Connecting to Pipe");
-            _clientStream = new NamedPipeClientStream(".", PIPE_NAME, PipeDirection.InOut, PipeOptions.WriteThrough);
+            SendTelegramMessage("Connecting to Pipe");
+            _clientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.WriteThrough);
             _clientStream.Connect();
             _clientStream.ReadMode = PipeTransmissionMode.Byte;
             timer = new Timer(LogLongProcessTime);
+        }
+        public void SendTelegramMessage(string message)
+        {
+            var urlString = $"https://api.telegram.org/bot{critAPIKey}/sendMessage?chat_id={chatID}&text={message}";
+            try
+            {
+                using (var webclient = new WebClient())
+                {
+                    webclient.DownloadString(urlString);
+                }
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(urlString + "\n" + exp.Message + "\n" + "Source: " + exp.Source + "\n" + "StackTrace: \n" + exp.StackTrace);
+            }
         }
 
         ~PythonClient()
