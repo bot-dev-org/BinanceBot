@@ -9,6 +9,7 @@ using Binance.Net.Objects.Models.Spot.Socket;
 using BinanceBot.Models;
 using BinanceBot.Services;
 using BinanceBot.Utils;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace BinanceBot.ViewModels
@@ -23,10 +24,12 @@ namespace BinanceBot.ViewModels
         private readonly ConcurrentQueue<Candle> _newProcessedCandlesQueue = new();
         private readonly ControlViewModel _controlViewModel;
         private ILogger<MainViewModel> _logger; 
+        public string Title { get; private set; }
 
-        public MainViewModel(BinanceManager binanceManager, StrategiesManager strategiesManager, 
+        public MainViewModel(BinanceManager binanceManager, StrategiesManager strategiesManager, IConfiguration config,
             CandlesManager candlesManager, ILogger<MainViewModel> logger, ControlViewModel controlViewModel)
         {
+            Title = $"Binance Bot - {config["PipeName"]}";
             _binanceManager = binanceManager;
             _strategiesManager = strategiesManager;
             _candlesManager = candlesManager;
