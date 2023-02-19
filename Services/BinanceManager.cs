@@ -17,6 +17,7 @@ using Binance.Net.Objects.Models.Spot.Socket;
 using BinanceBot.Models;
 using CryptoExchange.Net.Authentication;
 using CryptoExchange.Net.CommonObjects;
+using CryptoExchange.Net.Interfaces;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Sockets;
 using Microsoft.Extensions.Configuration;
@@ -34,12 +35,14 @@ public class BinanceManager
     private readonly BinanceSocketClient _wsClient;
     private readonly IBinanceClientUsdFuturesApi _futuresClient;
     private readonly ILogger<BinanceManager> _logger;
+    private const string WEIGHT_1M = "X-MBX-USED-WEIGHT-1M";
+    private const int WEIGHT_WARNING_THRESHOLD = 2000;
 
     public BinanceManager(ILogger<BinanceManager> logger, IConfiguration config)
     {
         var apiKey = config["BinanceAPIKey"];
         var apiSecret = config["BinanceSecretKey"];
-        var creds = new ApiCredentials(apiKey, apiSecret);
+        var creds = new BinanceApiCredentials(apiKey, apiSecret);
         var binanceLogger = new SerilogLoggerFactory(new LoggerConfiguration()
             .WriteTo.TeleSink(config["TelegramAPIKey"], config["TelegramChatId"], minimumLevel: LogEventLevel.Warning)
             .WriteTo.File("logs\\Binance.log", LogEventLevel.Debug, rollingInterval: RollingInterval.Day).CreateLogger()).CreateLogger("BinanceClient");
@@ -52,7 +55,7 @@ public class BinanceManager
             UsdFuturesApiOptions = new BinanceApiClientOptions
             {
                 AutoTimestamp = true, 
-                ApiCredentials = new ApiCredentials(apiKey, apiSecret),
+                ApiCredentials = new BinanceApiCredentials(apiKey, apiSecret),
                 TimestampRecalculationInterval = TimeSpan.FromMinutes(30),
                 RateLimitingBehaviour = RateLimitingBehaviour.Wait,
             }
@@ -60,7 +63,7 @@ public class BinanceManager
 
         _wsClient = new BinanceSocketClient(new BinanceSocketClientOptions
         {
-            UsdFuturesStreamsOptions = new SocketApiClientOptions()
+            UsdFuturesStreamsOptions = new BinanceSocketApiClientOptions()
             {
                 AutoReconnect = true,
                 ReconnectInterval = TimeSpan.FromSeconds(5),
@@ -74,11 +77,19 @@ public class BinanceManager
     public async Task<IEnumerable<BinanceFuturesUsdtSymbol>> InitializeAsync()
     {
         var exchangeInfo = await _futuresClient.ExchangeData.GetExchangeInfoAsync();
+        if (exchangeInfo.ResponseHeaders != null)
+        {
+            var w1m = exchangeInfo.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+            {
+                _logger.LogInformation("KeepAliveUserStreamAsync 1m weight: " + value); 
+            }
+        }
         if (!exchangeInfo.Success)
             throw new Exception($"Unable to get exchange data: {exchangeInfo.Error.Message}");
         foreach (var rateLimit in exchangeInfo.Data.RateLimits)
         {
-            _logger.LogInformation($"Rate limit {rateLimit.Type.ToString()}: {rateLimit.Limit} per {rateLimit.IntervalNumber} {rateLimit.Interval.ToString()}");
+            _logger.LogInformation($"Rate limit {rateLimit.Type}: {rateLimit.Limit} per {rateLimit.IntervalNumber} {rateLimit.Interval}");
         }
 
         return exchangeInfo.Data.Symbols;
@@ -110,6 +121,12 @@ public class BinanceManager
                 {
                     Thread.Sleep(TimeSpan.FromMinutes(5));
                     var response = _futuresClient.Account.KeepAliveUserStreamAsync(listenKey).Result;
+                    if (response.ResponseHeaders != null)
+                    {
+                        var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+                        if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                            _logger.LogInformation("KeepAliveUserStreamAsync 1m weight: " + w1m.Value.ElementAt(0));
+                    }
                     if (!response.Success)
                     {
                         _logger.LogError($"Unable to keep alive: {response.Error.Message}");
@@ -140,10 +157,20 @@ public class BinanceManager
         if (!listenKeyResponse.Success)
             throw new Exception($"Unable to get listen key: {listenKeyResponse.Error.Message}");
         response = await _wsClient.UsdFuturesStreams.SubscribeToUserDataUpdatesAsync(listenKeyResponse.Data,
-            OnLeverageUpdate, OnMarginUpdate, accountCallback, orderCallback, OnListenKeyExpired);
+            OnLeverageUpdate, OnMarginUpdate, accountCallback, orderCallback, OnListenKeyExpired, OnStrategyUpdate, OnGridUpdate);
         if (!response.Success)
             throw new Exception($"Unable to subscribe to user data: {response.Error.Message}");
         return listenKeyResponse.Data;
+    }
+
+    private void OnGridUpdate(DataEvent<BinanceGridUpdate> obj)
+    {
+        _logger.LogWarning($"OnGridUpdate: {JsonSerializer.Serialize(obj)}");
+    }
+
+    private void OnStrategyUpdate(DataEvent<BinanceStrategyUpdate> obj)
+    {
+        _logger.LogWarning($"OnStrategyUpdate: {JsonSerializer.Serialize(obj)}");
     }
 
     private void OnListenKeyExpired(DataEvent<BinanceStreamEvent> obj)
@@ -164,6 +191,12 @@ public class BinanceManager
     public async Task<IEnumerable<BinanceFuturesAccountBalance>> GetBalances()
     {
         var response = await _futuresClient.Account.GetBalancesAsync();
+        if (response.ResponseHeaders != null)
+        {
+            var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                _logger.LogInformation("GetBalancesAsync 1m weight: " + w1m.Value.ElementAt(0));
+        }
         if (!response.Success)
             throw new Exception($"Unable to get balances: {response.Error.Message}");
         return response.Data;
@@ -171,6 +204,12 @@ public class BinanceManager
     public async Task<decimal> GetTickerPrice(string symbol)
     {
         var response = await _futuresClient.ExchangeData.GetPriceAsync(symbol);
+        if (response.ResponseHeaders != null)
+        {
+            var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                _logger.LogInformation("GetPriceAsync 1m weight: " + w1m.Value.ElementAt(0));
+        }
         if (!response.Success)
             throw new Exception($"Unable to get price of {symbol}: {response.Error.Message}");
         return response.Data.Price;
@@ -178,6 +217,12 @@ public class BinanceManager
     public async Task<IEnumerable<Position>> GetPositions()
     {
         var response = await _futuresClient.CommonFuturesClient.GetPositionsAsync();
+        if (response.ResponseHeaders != null)
+        {
+            var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                _logger.LogInformation("GetPositionsAsync 1m weight: " + w1m.Value.ElementAt(0));
+        }
         if (!response.Success)
             throw new Exception($"Unable to get positions: {response.Error.Message}");
         return response.Data;
@@ -188,6 +233,12 @@ public class BinanceManager
         foreach (var symbol in symbols)
         {
             var response = await _futuresClient.Trading.GetUserTradesAsync(symbol, startTime, limit: 1000);
+            if (response.ResponseHeaders != null)
+            {
+                var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+                if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                    _logger.LogInformation("GetUserTradesAsync 1m weight: " + w1m.Value.ElementAt(0));
+            }
             if (!response.Success)
                 throw new Exception($"Unable to get trades for {symbol} from {startTime}: {response.Error.Message}");
             result.AddRange(response.Data);
@@ -204,6 +255,12 @@ public class BinanceManager
         {
             var tradesResult = await _futuresClient.ExchangeData.GetAggregatedTradeHistoryAsync(symbol, startTime: startTimeToLoad, endTime: endTime,
                 limit: limit);
+            if (tradesResult.ResponseHeaders != null)
+            {
+                var w1m = tradesResult.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+                if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                    _logger.LogInformation("GetAggregatedTradeHistoryAsync 1m weight: " + w1m.Value.ElementAt(0));
+            }
             if (!tradesResult.Success)
                 throw new Exception($"Unable to get trades: {tradesResult.Error.Message}");
             var trades = tradesResult.Data;
@@ -215,7 +272,13 @@ public class BinanceManager
     }
     public async Task<decimal> GetBalanceAsync(string symbol)
     {
-        var positions = await _futuresClient.Account.GetPositionInformationAsync(symbol); 
+        var positions = await _futuresClient.Account.GetPositionInformationAsync(symbol);
+        if (positions.ResponseHeaders != null)
+        {
+            var w1m = positions.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                _logger.LogInformation("GetPositionInformationAsync 1m weight: " + w1m.Value.ElementAt(0));
+        }
         if (!positions.Success)
         {
             throw new Exception($"Unable to get balance: {positions.Error.Message}");
@@ -226,6 +289,12 @@ public class BinanceManager
     public async Task PlaceOrderAsync(string symbol, decimal quantity, decimal price, OrderSide side)
     {
         var response = await _futuresClient.Trading.PlaceOrderAsync(symbol, side, FuturesOrderType.Limit, quantity, price, timeInForce:TimeInForce.GoodTillCanceled);
+        if (response.ResponseHeaders != null)
+        {
+            var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                _logger.LogInformation("PlaceOrderAsync 1m weight: " + w1m.Value.ElementAt(0));
+        }
         if (!response.Success)
         {
             throw new Exception($"Unable to place order: {response.Error.Message}");
@@ -234,6 +303,12 @@ public class BinanceManager
     public async Task CancelOrdersAsync(string symbol)
     {
         var response = await _futuresClient.Trading.CancelAllOrdersAsync(symbol);
+        if (response.ResponseHeaders != null)
+        {
+            var w1m = response.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+            if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                _logger.LogInformation("CancelAllOrdersAsync 1m weight: " + w1m.Value.ElementAt(0));
+        }
         if (!response.Success)
         {
             throw new Exception($"Unable to cancel orders: {response.Error.Message}");
@@ -259,6 +334,12 @@ public class BinanceManager
         while (true)
         {
             var nextKLinesResult = await _futuresClient.ExchangeData.GetKlinesAsync(symbol, interval, requestStartTime, endTime, limit);
+            if (nextKLinesResult.ResponseHeaders != null)
+            {
+                var w1m = nextKLinesResult.ResponseHeaders.FirstOrDefault(k => k.Key == WEIGHT_1M);
+                if (w1m.Value != null && w1m.Value.Count() > 0 && int.TryParse(w1m.Value.ElementAt(0), out int value) && value > WEIGHT_WARNING_THRESHOLD)
+                    _logger.LogInformation("GetKlinesAsync 1m weight: " + w1m.Value.ElementAt(0));
+            }
             if (!nextKLinesResult.Success)
             {
                 _logger.LogError($"Unable to get klines: {nextKLinesResult.Error.Message}");
